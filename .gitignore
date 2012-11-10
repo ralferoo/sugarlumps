@@ -1,0 +1,12 @@
+*.asm.out
+*.bin
+*.cdt
+*.d
+*.exe
+*.pak
+*.sym
+*.swp
+*.compat
+dnd.zip
+*.dsk
+junk/

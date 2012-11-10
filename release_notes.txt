@@ -1,0 +1,19 @@
+Here's a description I posted about the technical details of the demo:
+
+http://www.cpcwiki.eu/forum/demos/sugarlumps-demo/msg50472/#msg50472
+
+The raw copy/fill routine works out to be 5 cycles per pixel, so 5*64*48=15360 plus some overhead, which is less than a frame. In reality, though, extra cycles are needed for the chunky mode effect and also for the interrupt handling. However, one thing to remember is that the time spent in the portion of the screen in the chunky display needs to be accurately cycle counted to get the effect to work correctly. Given that the the copy/fill routine can be exactly cycle controlled, I decided to do the copy/fill processing only during the chunky area of the screen. So, the copy/fill code takes about 1.4 frames to render. However, this also means that 1/3 of each frame isn't used and so can be used to calculate the next frame.
+
+That still leaves at about 0.6 periods of chunky areas unused per 2 frames, so I decided to use that to do my triangle filling. I optimised the inner loop of the Bresenham line algorithm and got it down to a constant 20 cycles per step - so again, this is ideal for fitting around an accurate cycle counted chunky area. So, I end up with 3 possible code paths for the chunky area of the screen:
+
+    Drawing lines into the copy/fill buffer for the whole area
+    Drawing lines into the copy/fill buffer for the top half, copy/filling the top 1/3 of the screen
+    Copy/filling the bottom 2/3 of the screen
+
+The last 2 steps work fine because the beam has already rendered past the area of screen being updated at any point, so no tearing is visible.
+Also, the fastest a complete this code will run at is in 2 frames (as happens with the twister) but could take much longer if there is triangle filling work to do. Interestingly, the twister subverts the code path slightly because this demo was always meant to be a triangle drawing demo not a twister demo! Most of the demo updates the screen every 3 frames.
+
+So, back to that spare 1/3 of the CPU time - of the 312 screen lines, between 192 and 200 are used to handle the filling process, leaving about 100 or so free after the music interrupt and scroller. During this time, we're generating data for the Bresenham inner loop. To avoid the possibility of rendering data before all sides of the triangle are drawn, I actually triple buffer these buffers!
+
+I've actually already tidied up the source ready for release, but I'll hold off releasing it until after the next demo as the process described above will be largely untouched in the next demo - that'll be all about the 3D code to generate the required triangles... :)
+

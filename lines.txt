@@ -1,0 +1,462 @@
+hmmm
+
+i think x needs to be +1 when going down
+
+
+
+Old "optimised" render loop definition looked like this:
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; bresenham render loop
+;
+; this is written with the same constraints as the chunky filler. i.e. in every
+; 6 scanlines, it does work for 5 lines, switches line repeat off, does another
+; line of work and switches line repeat back on.
+;
+;		a = accumulated error
+;		af' = trashed
+;		b = loop counter, c = pixel colour
+;		iyh = -defaultstep (input=error), iyl = defaultstep+2  
+;		d = deltay, e = deltax
+;		h = x address, l = y address (and lsb of x)
+;		ixl = chunky line counter
+
+
+Before this happens, we had:
+
+(h,l,d,e)=(x0,y0,x1,y1) 
+
+Calculate deltax (always +ve):
+	a = d-h
+	a==0 -> vertical, so nothing to do...
+	a<0 -> ex hl,de; a=-a
+
+Calculate deltay:
+	a = e-l
+	a>=0 ->
+		error = deltay / 2
+		defaultstep = -2
+		do
+			defaultstep ++
+			deltay -= deltax
+		while (deltay >=0 )
+		deltay += deltax	; defaultstep = int(deltay/deltax)
+					; deltay %= deltax
+
+		convert h,l into coords
+			h = h + start_page
+			jr c, start_coord_off_page
+		
+			rl l			; add 0 bit
+			scf
+			rl l			; add 1 bit, so *4 + 1
+		
+		loops = deltax
+		while loops > 0:
+			error = error - deltay
+			if error<0:			; jr nc around?
+				error += deltax
+				y ++
+
+			y += defaultstep
+			[hl] = [hl] ^ colour
+			x++
+			loops--
+
+
+
+
+New logic:
+
+(h,l,d,e)=(y0,x0,y1,x1) 
+
+deltay = d-h
+if deltay == 0, then no-op (for line segments of a poly)
+if deltay <0, then ex hl,de, deltay = -deltay
+assert deltay>0
+
+loops = deltay
+
+deltax = e-l
+if deltax >= 0
+	error = deltax/2
+	xstep = 0
+	while (deltax >= deltay)
+		deltax -= deltay
+		xstep += 1
+	hl = coords ( h += page_base, l = l*4+1 )
+	while (loops--)				; loops is always at least 1
+		error -= deltax
+		if (error < 0)
+			error += deltay
+			x += 1			; l+=4
+		x += xstep
+		plot x,y
+		y += 1				; maybe before the plot?
+	
+else
+	error = deltax/2 - 1 
+	xstep = 0
+	while (deltax < 0)
+		deltax += deltay
+		xstep += 1			; this will be "subtracted"
+	hl = coords ( h += page_base, l = l*4+1 )
+	while (loops--)
+		error -= deltax
+		if (error >= 0)
+			error -= deltay
+			x -= 1			; l+=4
+		x -= xstep
+		plot x,y
+		y += 1
+	
+
+So new main loop:
+
+while (loops--)
+	error -= deltax
+	if (error < 0)
+		error += deltax
+		x += xinc + xstep
+	else
+		x += xstep
+	plot x,y
+	y += 1
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+b = loops
+c = error
+d = deltax
+e = deltay
+hl = address
+ixh = xinc + xstep
+ixl = xstep
+
+loop:
+	ld a,c				1
+	sub a,d				1
+	jr nc,no_error_overflow		3/2
+	add a,e				1
+	ld c,a				1
+
+	ld a,ixh			2
+	add a,l				1
+	ld l,a				1
+
+	ld a,(hl)			2
+	xor #33				2
+	ld (hl),a			2
+
+	inc h				1
+	jr z, finished			3/2
+	djnz loop			4/3
+finished:
+	ret				3
+	
+no_error_overflow:
+	ld c,a				1
+
+	ld a,ixl			2
+	add a,l				1	
+	ld l,a				1
+
+	ld a,(hl)			2
+	xor #33				2
+	ld (hl),a			2
+
+	inc h				1
+	jr z, finished			3/2
+	djnz loop			4/3
+finished:
+	ret				3
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+; restrict b so h doesn't overflow
+; e.g.: ld a,h ; neg ; cp b ; jr nc, no_overflow ; ld b,a  (6 cycles up front)
+
+b = loops
+c = error			(maybe use a')
+d = deltax
+e = deltay
+b' = xinc + xstep
+c' = colour
+d' = xstep			(actually always constant)
+hl' = address
+
+loop has 20 cycles per pixel
+
+loop:
+	ld a,c				1
+	sub a,d				1
+	jr nc,no_error_overflow		3/2
+	add a,e				1
+	ld c,a				1
+;6
+	exx				1
+	ld a,b				1
+	add a,l				1
+	ld l,a				1
+;4
+	ld a,(hl)			2
+	xor c				1
+	ld (hl),a			2
+;4
+	inc h				1
+	exx				1
+;2
+	djnz loop			4/3
+;4
+finished:
+	ret				3
+	
+no_error_overflow:			(5)
+	ld c,a				1
+
+	exx				1
+	ld a,d				1
+	add a,l				1
+	ld l,a				1
+
+	ld a,(hl)			2
+	xor c				1
+	ld (hl),a			2
+
+	inc h				1
+	exx				1
+	djnz loop			4/3
+finished:
+	ret				3
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+a/a' = error
+b = loops
+c = colour
+d = deltax
+e = deltay
+hl = address
+ixh = error
+ixl = xinc + xstep
+iyl = xstep		; always 4!
+
+; restrict b so h doesn't overflow
+; e.g.: ld a,h ; neg ; cp b ; jr nc, no_overflow ; ld b,a  (6 cycles up front)
+
+next_block:
+	pop bc				3
+
+	ld a,b				1
+	or c				1
+	jp nz, finished_all_blocks	3
+
+	pop de				3
+	pop hl				3
+	pop ix				4
+	ld a,ixh			2
+;15/20
+
+loop:
+	sub a,d				1
+	jr nc,no_error_overflow		3/2
+	add a,e / 0			0/1	; (not present for no overflow)
+;4
+	ex af,af'			1	; save error
+	ld a,ixl / iyl			2	; (iyl for no overflow)
+	add a,l				1
+	ld l,a				1
+;5
+	ld a,(hl)			2
+	xor c				1
+	ld (hl),a			2
+	ex af,af'			1	; restore error
+;6
+	inc h				1
+	djnz loop			4/3
+;5
+	jr next_block			3
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+	ld (sp_restore),sp
+sp_save equ $+1
+	ld sp,0
+
+	xor a			; clear zero flag before calling anything
+	call process_1_iteration
+	out (c),c
+	call process_3_iteration
+	out (c),c
+	jp process_3_iteration
+	...			; until end of page
+
+	jr z,no_save_last	; check if something still in progress
+	exx
+	push ix
+	push hl
+	push de
+	push bc
+	exx
+
+	ld (sp_save),sp
+sp_restore equ $+1
+	ld sp,0
+	ret			; save everything
+
+process_2_iterations:
+	pop hl
+	exx
+	jr nz, start_iteration1
+
+fetch_data_1:
+	pop bc
+	ld a,b
+	or a
+	jr z, end_of_data
+
+	pop de
+	pop hl
+	pop ix
+
+;;;	jr nz, start_iteration2
+	
+end_of_data:
+	push bc
+	*delay*
+	jr fetch_data2
+
+start_iteration1:
+	
+
+
+	...
+	exx
+	jp (hl)
+
+
+call x : pop hl : jp (hl) - 5 + 3 + 1 = 9
+call x : ret - 5 + 3 = 8
+ld hl,y : jp x : jp (hl)  - 3 + 3 + 1 = 7
+ld l,lo(y) : jp x : jp (hl) - 2 + 3 + 1 = 6
+
+;;;;;;;;;
+
+entry:
+	jp z,try_load_phase1				;3
+
+iteration1:
+	sub a,d : jr nc, no_overflow_1 : add a,e	; 4
+	ex af,'af : ld a,ixl : add a,l : ld l,a		; 5
+	ld a,(hl) : xor c : ld (hl),a : ex af,af'	; 6
+	inc h : djnz iteration2				; 5 to it2, 4
+;19
+	pop bc : ld a,b : or c : jr z, end_phase2	; 7, 8 to end_phase2
+	pop de : pop hl : pop ix : ld a,ixh		; 12
+	jr iteration3					; 3
+;22
+
+no_overflow1:
+	ex af,'af : ld a,iyl : add a,l : ld l,a		; 5
+	ld a,(hl) : xor c : ld (hl),a : ex af,af'	; 6
+	inc h : djnz iteration2				; 5 to it2, 4
+;19
+try_load_phase2:
+	pop bc : ld a,b : or c : jr nz, load_phase3	; 7, 8 to load_phase3
+	inc b : push bc					; 5
+	jr try_load_phase3				; 3
+; 15 from try_load_phase2, should be 20
+
+load_phase2:	...
+iteration2:	...
+no_overflow2:	...
+try_load_phase2:...
+
+load_phase3:
+	pop de : pop hl : pop ix : ld a,ixh		; 12
+; 20 from try_load_phase2
+iteration3:
+
+
+20 cycles from iteration1 to iteration2
+21 cycles from iteration1 to load_phase2
+
+	pop bc : djnz load_phase3			; 7 to lp3, 6
+
+end_phase2:
+	nop * 5						; 5
+	push bc : jr load_phase3			; 7
+
+load_phase2:
+	pop bc : ld a,b : or c : jr z, end_phase2	; 7, 8 to end_phase2
+	pop de : pop hl : pop ix : ld a,ixh		; 12
+iteration3:
+
+19 cycles from load_phase2 to iteration3
+
+;;;;;;;;;
+;;;;;;;;;
+
+maybe	y++, x+=xstep  -> add hl,de     3 cycles
+	y++, x+=xinc   -> add hl,bc     but watch out for overflow in x
+
+not really a benefit:
+
+	sub a,d : jr nc, no_overflow : add a,e		; 4
+	ex af,af' : ld a,h : exx			; 3
+	add hl, de : add (hl) : ld (hl),a		; 7
+	exx : ex af,af'					; 2
+	djnz iteration2					; 4 to it2, 5 to lp2
+
+;;;;;;;;;
+;;;;;;;;;
+
+
+a/a' = error
+b = loops
+c = colour
+d = deltax
+e = deltay
+hl = address
+ixh = error
+ixl = xinc + xstep
+iyl = xstep		; always 4!
+
+; restrict b so h doesn't overflow
+; e.g.: ld a,h ; neg ; cp b ; jr nc, no_overflow ; ld b,a  (6 cycles up front)
+
+next_block:
+	pop bc				3
+
+	ld a,b				1
+	or c				1
+	jp nz, finished_all_blocks	3
+
+	pop de				3
+	pop hl				3
+	pop ix				4
+	ld a,ixh			2
+;15/20
+
+loop:
+	sub a,d				1
+	jr nc,no_error_overflow		3/2
+	add a,e / 0			0/1	; (not present for no overflow)
+;4
+	ex af,af'			1	; save error
+	ld a,ixl / iyl			2	; (iyl for no overflow)
+	add a,l				1
+	ld l,a				1
+;5
+	ld a,(hl)			2
+	xor c				1
+	ld (hl),a			2
+	ex af,af'			1	; restore error
+;6
+	inc h				1
+	djnz loop			4/3
+;5
+	jr next_block			3
