@@ -26,9 +26,9 @@ clean:
 	rm -f *.wav *.cdt *.bin *.au *.pak *.sym *.asm.out *.compat *.exe *.d *.dsk sugarlumps.zip
 	( cd include ; rm -f *.wav *.cdt *.bin *.au *.pak *.sym *.asm.out *.compat *.exe *.d )
 
-%.zip: %.dsk %.cdt %-slow.cdt %-readme.txt
+%.zip: %.dsk %.cdt %-slow.cdt %.rom %-slow.cdt %-readme.txt
 	cp .git/refs/heads/master git-revision.txt
-	zip $@ $*.dsk $*.cdt $*-slow.cdt $*-readme.txt git-revision.txt
+	zip $@ $*.dsk $*.cdt $*-slow.cdt $*.rom $*-readme.txt git-revision.txt
 	rm -f  git-revision.txt
 
 publish:
@@ -67,6 +67,9 @@ date.bin: Makefile $(ASMS)
 
 %.exe: %.pak unpacker0800.bin
 	cat unpacker0800.bin $< >$@
+
+%.rom: %.pak unpacker0800rom.bin
+	cat unpacker0800rom.bin $< >$@
 
 %.pak: %.bin
 	MegaLZ $< $@
