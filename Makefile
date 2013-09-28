@@ -1,4 +1,4 @@
-all: sugarlumps.cdt sugarlumps.dsk sugarlumps.zip
+all: sugarlumps.cdt sugarlumps.dsk sugarlumps.zip sugarlumps.rom
 
 #all: patch.cdt
 #linear.cdt linear.wav loader.cdt loader.wav unpacker.bin testdata.wav testdata.cdt
